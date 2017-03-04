@@ -3,6 +3,7 @@ package com.agoragames.leaderboard;
 import java.util.*;
 
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.Tuple;
 import redis.clients.jedis.Transaction;
 
@@ -10,34 +11,11 @@ public class Leaderboard {
 
 	public static final String VERSION = "2.0.2";
 	public static final int DEFAULT_PAGE_SIZE = 25;
-	public static final String DEFAULT_REDIS_HOST = "localhost";
-	public static final int DEFAULT_REDIS_PORT = 6379;
   	public static final List<LeaderData> EMPTY_LEADER_DATA = Collections.emptyList();
 
-  	private Jedis _jedis;
+  	private JedisPool _pool;
 	private String _leaderboardName;
 	private int _pageSize;
-
-	/**
-	 * Create a leaderboard using the default host, default port, and default page size
-	 *
-	 * @param leaderboardName Name of the leaderboard
-	 */
-	public Leaderboard(String leaderboardName) {
-		this(leaderboardName, DEFAULT_REDIS_HOST, DEFAULT_REDIS_PORT, DEFAULT_PAGE_SIZE);
-	}
-
-	/**
-	 * Create a leaderboard with a given name, host, port and page size
-	 *
-	 * @param leaderboardName Name of the leaderboard
-	 * @param host Redis host
-	 * @param port Redis port
-	 * @param pageSize Page size
-	 */
-	public Leaderboard(String leaderboardName, String host, int port, int pageSize) {
-		this(leaderboardName, pageSize, new Jedis(host, port));
-	}
 
 	/**
 	 * Create a leaderboard with a given name, page size and existing Redis connection
@@ -46,7 +24,7 @@ public class Leaderboard {
 	 * @param pageSize Page size
 	 * @param redisConnection Redis connection
 	 */
-	public Leaderboard(String leaderboardName, int pageSize, Jedis redisConnection) {
+	public Leaderboard(String leaderboardName, int pageSize, JedisPool pool) {
 	    _leaderboardName = leaderboardName;
 	    _pageSize = pageSize;
 
@@ -54,7 +32,7 @@ public class Leaderboard {
 	        _pageSize = DEFAULT_PAGE_SIZE;
 	    }
 
-	    _jedis = redisConnection;
+	    _pool = pool;
 	}
 
 	/**
@@ -81,7 +59,9 @@ public class Leaderboard {
 	 * @return Page size
 	 */
 	public long deleteLeaderboardNamed(String leaderboardName) {
-		return _jedis.del(leaderboardName);
+	    try (final Jedis jedis = _pool.getResource()) {
+	        return jedis.del(leaderboardName);
+	    }
 	}
 
 	/**
@@ -110,7 +90,9 @@ public class Leaderboard {
 	 * Disconnect from the Redis instance
 	 */
 	public void disconnect() {
-		_jedis.disconnect();
+        try (final Jedis jedis = _pool.getResource()) {
+            jedis.disconnect();
+        }
 	}
 
 	/**
@@ -129,7 +111,9 @@ public class Leaderboard {
 	 * @return Total # of members in the leaderboard
 	 */
 	public long totalMembersIn(String leaderboardName) {
-		return _jedis.zcard(leaderboardName);
+        try (final Jedis jedis = _pool.getResource()) {
+            return jedis.zcard(leaderboardName);
+        }
 	}
 
 	/**
@@ -176,7 +160,9 @@ public class Leaderboard {
 	 * @return Total # of members in the named leaderboard in a score range
 	 */
 	public long totalMembersInScoreRangeIn(String leaderboardName, double minScore, double maxScore) {
-		return _jedis.zcount(leaderboardName, minScore, maxScore);
+        try (final Jedis jedis = _pool.getResource()) {
+            return jedis.zcount(leaderboardName, minScore, maxScore);
+        }
 	}
 
 	/**
@@ -199,7 +185,9 @@ public class Leaderboard {
 	 * @return
 	 */
 	public long rankMemberIn(String leaderboardName, String member, double score) {
-		return _jedis.zadd(leaderboardName, score, member);
+        try (final Jedis jedis = _pool.getResource()) {
+            return jedis.zadd(leaderboardName, score, member);
+        }
 	}
 
 	/**
@@ -222,7 +210,9 @@ public class Leaderboard {
      * @return Member score
 	 */
 	public Double scoreForIn(String leaderboardName, String member) {
-		return _jedis.zscore(leaderboardName, member);
+        try (final Jedis jedis = _pool.getResource()) {
+            return jedis.zscore(leaderboardName, member);
+        }
 	}
 
 	/**
@@ -245,7 +235,9 @@ public class Leaderboard {
 	 * @return Updated score
 	 */
 	public double changeScoreForMemberIn(String leaderboardName, String member, double delta) {
-		return _jedis.zincrby(leaderboardName, delta, member);
+        try (final Jedis jedis = _pool.getResource()) {
+            return jedis.zincrby(leaderboardName, delta, member);
+        }
 	}
 
 	/**
@@ -266,7 +258,9 @@ public class Leaderboard {
 	 * @return true if member is in the named leaderboard, false otherwise
 	 */
 	public boolean checkMemberIn(String leaderboardName, String member) {
-		return !(_jedis.zscore(leaderboardName, member) == null);
+        try (final Jedis jedis = _pool.getResource()) {
+            return !(jedis.zscore(leaderboardName, member) == null);
+        }
 	}
 
 	/**
@@ -294,17 +288,19 @@ public class Leaderboard {
 
         Long result = null;
 
-        Long redisRank = _jedis.zrevrank(leaderboardName, member);
-
-        if (redisRank != null) {
-            if (useZeroIndexForRank) {
-    			result = redisRank;
-	    	} else {
-		    	result = (redisRank + 1);
-		    }
+        try (final Jedis jedis = _pool.getResource()) {
+            Long redisRank = jedis.zrevrank(leaderboardName, member);
+    
+            if (redisRank != null) {
+                if (useZeroIndexForRank) {
+        			result = redisRank;
+    	    	} else {
+    		    	result = (redisRank + 1);
+    		    }
+            }
+    
+            return result;
         }
-
-        return result;
 	}
 
 	/**
@@ -327,7 +323,9 @@ public class Leaderboard {
 	 * @return
 	 */
 	public long removeMembersInScoreRangeIn(String leaderboardName, double minScore, double maxScore) {
-		return _jedis.zremrangeByScore(leaderboardName, minScore, maxScore);
+        try (final Jedis jedis = _pool.getResource()) {
+            return jedis.zremrangeByScore(leaderboardName, minScore, maxScore);
+        }
 	}
 
 	/**
@@ -352,20 +350,22 @@ public class Leaderboard {
 	public Hashtable<String, Object> scoreAndRankForIn(String leaderboardName, String member, boolean useZeroIndexForRank) {
 		Hashtable<String, Object> data = new Hashtable<String, Object>();
 
-		Transaction transaction = _jedis.multi();
-        transaction.zscore(leaderboardName, member);
-        transaction.zrevrank(leaderboardName, member);
-        List<Object> response = transaction.exec();
-
-		data.put("member", member);
-		data.put("score", response.get(0));
-		if (useZeroIndexForRank) {
-		    data.put("rank", response.get(1));
-		} else {
-		    data.put("rank", (Long) response.get(1) + 1);
-		}
-
-		return data;
+        try (final Jedis jedis = _pool.getResource()) {
+    		Transaction transaction = jedis.multi();
+            transaction.zscore(leaderboardName, member);
+            transaction.zrevrank(leaderboardName, member);
+            List<Object> response = transaction.exec();
+    
+    		data.put("member", member);
+    		data.put("score", response.get(0));
+    		if (useZeroIndexForRank) {
+    		    data.put("rank", response.get(1));
+    		} else {
+    		    data.put("rank", (Long) response.get(1) + 1);
+    		}
+    
+    		return data;
+        }
 	}
 
 	/**
@@ -408,8 +408,10 @@ public class Leaderboard {
 		}
 		int endingOffset = (startingOffset + pageSize) - 1;
 
-		Set<Tuple> rawLeaderData = _jedis.zrevrangeWithScores(leaderboardName, startingOffset, endingOffset);
-		return massageLeaderData(leaderboardName, rawLeaderData, useZeroIndexForRank);
+        try (final Jedis jedis = _pool.getResource()) {
+    		Set<Tuple> rawLeaderData = jedis.zrevrangeWithScores(leaderboardName, startingOffset, endingOffset);
+    		return massageLeaderData(leaderboardName, rawLeaderData, useZeroIndexForRank);
+        }
 	}
 
 	/**
@@ -433,25 +435,27 @@ public class Leaderboard {
 	 * @return Leaders around a given member in the named leaderboard as a list of LeaderData
 	 */
 	public List<LeaderData> aroundMeIn(String leaderboardName, String member, boolean useZeroIndexForRank, int pageSize) {
-		Long reverseRankForMember = _jedis.zrevrank(leaderboardName, member);
-
-        if (reverseRankForMember == null) {
-            return EMPTY_LEADER_DATA;
+        try (final Jedis jedis = _pool.getResource()) {
+    		Long reverseRankForMember = jedis.zrevrank(leaderboardName, member);
+    
+            if (reverseRankForMember == null) {
+                return EMPTY_LEADER_DATA;
+            }
+    
+    
+    		if (pageSize < 1) {
+    			pageSize = DEFAULT_PAGE_SIZE;
+    		}
+    
+    		int startingOffset = reverseRankForMember.intValue() - (pageSize / 2);
+    		if (startingOffset < 0) {
+    			startingOffset = 0;
+    		}
+    		int endingOffset = (startingOffset + pageSize) - 1;
+    
+    		Set<Tuple> rawLeaderData = jedis.zrevrangeWithScores(leaderboardName, startingOffset, endingOffset);
+    		return massageLeaderData(leaderboardName, rawLeaderData, useZeroIndexForRank);
         }
-
-
-		if (pageSize < 1) {
-			pageSize = DEFAULT_PAGE_SIZE;
-		}
-
-		int startingOffset = reverseRankForMember.intValue() - (pageSize / 2);
-		if (startingOffset < 0) {
-			startingOffset = 0;
-		}
-		int endingOffset = (startingOffset + pageSize) - 1;
-
-		Set<Tuple> rawLeaderData = _jedis.zrevrangeWithScores(leaderboardName, startingOffset, endingOffset);
-		return massageLeaderData(leaderboardName, rawLeaderData, useZeroIndexForRank);
 	}
 
 	/**
